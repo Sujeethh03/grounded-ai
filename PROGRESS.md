@@ -1,6 +1,18 @@
 # Progress
 
-## Status: M1, M2, M3, M5, M6 built — M4 (Neo4j graph) deferred; real LLM runs pending API key
+## Status: M1, M2, M3, M5, M6 + API layer built — M4 (Neo4j) deferred; real LLM runs pending API key
+
+**API layer (built after M6, proven live end-to-end)**
+- `ingestion/celery_app.py` + `ingestion/tasks.py`: Celery over Redis (acks_late,
+  prefetch=1), thin tasks wrapping the proven pipeline functions.
+- `api/main.py`: /healthz, /readyz (real Postgres+Redis checks), /metrics (Prometheus
+  counters + latency histograms via middleware, JSON structured request logs),
+  POST /api/v1/ingest/{cik} (202 + task id), GET /api/v1/tasks/{id},
+  GET /api/v1/filings, POST /api/v1/query (503 until OPENAI_API_KEY set).
+- **Live proof**: started worker + uvicorn, POSTed ingest for Tesla (CIK 1318605) →
+  task went through Redis → worker pulled 3 real filings from EDGAR → SUCCESS state with
+  result via GET /api/v1/tasks → Tesla visible in /api/v1/filings. Redis installed via brew.
+- 38 tests passing (API tests mock the queue; readyz/filings covered by the live run).
 
 ## What's built
 
