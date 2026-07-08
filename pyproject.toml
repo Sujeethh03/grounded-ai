@@ -24,6 +24,10 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "lxml>=5.3",
     "python-dotenv>=1.0",
+    "pytesseract>=0.3.13",
+    "pypdfium2>=4.30",
+    "pillow>=10.4",
+    "openai>=1.50",
 ]
 
 [project.optional-dependencies]

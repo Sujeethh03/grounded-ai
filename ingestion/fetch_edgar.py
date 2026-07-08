@@ -157,8 +157,13 @@ def filing_source_url(meta: FilingMeta) -> str:
     )
 
 
-async def fetch_filing_document(meta: FilingMeta, client: httpx.AsyncClient | None = None) -> str:
-    """Fetch the raw primary document (HTML/text) for one filing."""
+async def fetch_filing_document(meta: FilingMeta, client: httpx.AsyncClient | None = None) -> bytes:
+    """Fetch the raw primary document for one filing.
+
+    Returns bytes, not str: the caller sniffs for PDF magic bytes to decide
+    between the HTML parse path and the OCR fallback (M2), and decoding
+    before that decision would corrupt binary content.
+    """
     url = filing_source_url(meta)
 
     owns_client = client is None
@@ -169,7 +174,7 @@ async def fetch_filing_document(meta: FilingMeta, client: httpx.AsyncClient | No
         except (httpx.HTTPStatusError, httpx.TransportError) as exc:
             log.error("edgar_document_fetch_failed", accession=meta.accession_number, url=url, error=str(exc))
             raise EDGARFetchFailed(f"failed to fetch document for {meta.accession_number}") from exc
-        return response.text
+        return response.content
     finally:
         if owns_client:
             await client.aclose()

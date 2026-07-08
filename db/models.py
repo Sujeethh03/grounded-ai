@@ -51,6 +51,8 @@ class Filing(Base):
     source_url: Mapped[str] = mapped_column(Text)
     ingestion_status: Mapped[str] = mapped_column(String(32), default=IngestionStatus.PENDING.value)
     ingested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Mean Tesseract word confidence (0-1) when the OCR path ran; NULL for text-native filings.
+    ocr_confidence: Mapped[float | None] = mapped_column(Numeric(3, 2), nullable=True)
 
     sections: Mapped[list["FilingSection"]] = relationship(back_populates="filing", cascade="all, delete-orphan")
     chunks: Mapped[list["DocChunk"]] = relationship(back_populates="filing", cascade="all, delete-orphan")

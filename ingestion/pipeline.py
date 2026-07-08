@@ -20,7 +20,9 @@ from sqlalchemy import select
 from db.models import Filing, FilingSection, IngestionStatus
 from db.session import get_session
 from ingestion.fetch_edgar import EDGARFetchFailed, fetch_filing_document, filing_source_url, get_company_filings
-from ingestion.normalize import normalize_filing
+from ingestion.normalize import NormalizedDocument, NormalizedSection, normalize_filing
+from ingestion.ocr_fallback import extract_text_via_ocr, looks_like_pdf
+from ingestion.schema_drift import check_structure
 
 log = structlog.get_logger(__name__)
 
@@ -67,8 +69,38 @@ async def ingest_company(cik: str, limit: int = 5) -> dict[str, int]:
                 session.flush()  # assigns filing.id for the FilingSection FK below
 
                 try:
-                    raw_html = await fetch_filing_document(meta, client=client)
-                    doc = normalize_filing(raw_html, meta.form_type, meta.accession_number)
+                    raw = await fetch_filing_document(meta, client=client)
+
+                    if looks_like_pdf(raw):
+                        # M2 OCR path: scanned/PDF-only document, no HTML to parse.
+                        ocr = extract_text_via_ocr(raw)
+                        doc = NormalizedDocument(
+                            accession_number=meta.accession_number,
+                            form_type=meta.form_type,
+                            sections=[NormalizedSection(name="Full Text (OCR)", index=0, text=ocr.text)],
+                        )
+                        filing.ingestion_status = IngestionStatus.OCR_FALLBACK.value
+                        filing.ocr_confidence = ocr.confidence
+                        log.info(
+                            "filing_routed_to_ocr",
+                            accession=meta.accession_number,
+                            confidence=ocr.confidence,
+                        )
+                    else:
+                        doc = normalize_filing(
+                            raw.decode("utf-8", errors="replace"), meta.form_type, meta.accession_number
+                        )
+                        drift = check_structure(doc)
+                        if not drift.ok:
+                            # Keep the sections for triage, but never let a bad
+                            # parse flow silently into the index (M3 skips these).
+                            filing.ingestion_status = IngestionStatus.SCHEMA_DRIFT_FLAGGED.value
+                            log.warning(
+                                "filing_schema_drift_flagged",
+                                accession=meta.accession_number,
+                                reason=drift.reason,
+                            )
+
                     for section in doc.sections:
                         session.add(
                             FilingSection(
@@ -84,6 +116,7 @@ async def ingest_company(cik: str, limit: int = 5) -> dict[str, int]:
                         "filing_ingested",
                         accession=meta.accession_number,
                         form_type=meta.form_type,
+                        status=filing.ingestion_status,
                         sections=len(doc.sections),
                     )
                 except EDGARFetchFailed as exc:
