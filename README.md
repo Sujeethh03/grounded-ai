@@ -12,7 +12,11 @@ Current status: `PROGRESS.md`.
 ## Stack
 
 FastAPI · Celery + Redis · PostgreSQL + pgvector (one store, both retrieval arms) ·
+Neo4j knowledge graph (risk-topic entities, parameterized-Cypher-only agent arm) ·
 LangGraph · OpenAI (embeddings + cost-tiered chat) · Tesseract OCR · Prometheus metrics
+
+Measured (10-case golden QA eval): refusal_correctness 0.90 · citation_validity 1.00 ·
+keyword_coverage 0.88
 
 ## Quickstart (local)
 

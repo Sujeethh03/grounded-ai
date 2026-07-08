@@ -36,9 +36,29 @@ REFUSAL = (
 )
 
 
+def _run_graph_lookups(lookups: list[dict]) -> list:
+    """Graph lookups are best-effort: if Neo4j is down or empty, the text-RAG
+    arm still answers — the graph augments retrieval, it must never break it."""
+    from agents import graph_agent
+
+    hits = []
+    for lookup in lookups:
+        try:
+            if lookup["kind"] == "companies_discussing":
+                hits.extend(graph_agent.companies_discussing(lookup["arg"]))
+            elif lookup["kind"] == "topics_for_company":
+                hits.extend(graph_agent.topics_for_company(lookup["arg"]))
+            elif lookup["kind"] == "shared_topics":
+                hits.extend(graph_agent.companies_sharing_topics())
+        except Exception as exc:
+            log.warning("graph_lookup_failed", kind=lookup.get("kind"), error=str(exc))
+    return hits
+
+
 class AskState(TypedDict, total=False):
     question: str
     sub_queries: list[str]
+    graph_lookups: list[dict]
     chunks: list[LabeledChunk]
     draft: str
     violations: list[str]
@@ -58,12 +78,16 @@ class AskResult:
 def build_graph(chat: Chat, embedder: Embedder):
     def plan_node(state: AskState) -> AskState:
         result = plan(state["question"], chat)
-        log.info("planned", sub_queries=result.sub_queries)
-        return {"sub_queries": result.sub_queries}
+        log.info("planned", sub_queries=result.sub_queries, graph_lookups=len(result.graph_lookups))
+        return {
+            "sub_queries": result.sub_queries,
+            "graph_lookups": [lookup.model_dump() for lookup in result.graph_lookups],
+        }
 
     def retrieve_node(state: AskState) -> AskState:
-        chunks = gather_context(state["sub_queries"], embedder)
-        log.info("retrieved", chunks=len(chunks))
+        graph_hits = _run_graph_lookups(state.get("graph_lookups", []))
+        chunks = gather_context(state["sub_queries"], embedder, extra_hits=graph_hits)
+        log.info("retrieved", chunks=len(chunks), graph_facts=len(graph_hits))
         return {"chunks": chunks}
 
     def synthesize_node(state: AskState) -> AskState:

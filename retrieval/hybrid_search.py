@@ -16,7 +16,7 @@ import uuid
 from dataclasses import dataclass
 
 import structlog
-from sqlalchemy import Float, cast, func, select
+from sqlalchemy import func, select
 
 from db.models import DocChunk, Filing
 from db.session import get_session
@@ -79,11 +79,11 @@ def hybrid_search(query: str, embedder: Embedder, top_k: int = DEFAULT_TOP_K) ->
             return []
 
         rows = session.execute(
-            select(DocChunk, Filing, cast(DocChunk.ocr_confidence, Float))
+            select(DocChunk, Filing)
             .join(Filing, DocChunk.filing_id == Filing.id)
             .where(DocChunk.id.in_(top_ids))
         ).all()
-        by_id = {chunk.id: (chunk, filing, ocr_conf) for chunk, filing, ocr_conf in rows}
+        by_id = {chunk.id: (chunk, filing) for chunk, filing in rows}
 
         hits = [
             SearchHit(
@@ -94,11 +94,11 @@ def hybrid_search(query: str, embedder: Embedder, top_k: int = DEFAULT_TOP_K) ->
                 fiscal_year=filing.fiscal_year,
                 section=chunk.section,
                 text=chunk.chunk_text,
-                ocr_confidence=ocr_conf,
+                ocr_confidence=float(chunk.ocr_confidence) if chunk.ocr_confidence is not None else None,
                 rrf_score=round(fused[chunk_id], 5),
             )
             for chunk_id in top_ids
-            for chunk, filing, ocr_conf in [by_id[chunk_id]]
+            for chunk, filing in [by_id[chunk_id]]
         ]
         log.info("hybrid_search_done", query=query, lexical=len(lexical_ids), dense=len(dense_ids), returned=len(hits))
         return hits

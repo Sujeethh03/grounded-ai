@@ -1,1 +1,104 @@
-"""M5: Cypher queries against Neo4j for graph-required questions."""
+"""M4 Graph agent: deterministic Cypher lookups exposed as citable sources.
+
+No LLM writes Cypher here — the planner picks a topic from the fixed taxonomy
+and these functions run parameterized queries. That's a deliberate trade-off:
+free-form text-to-Cypher is flexible but injects an unauditable generation
+step into what's supposed to be the *reliable* arm of retrieval. A fact like
+"3 companies discuss supply_chain risk" must be exactly what the graph says.
+
+Graph facts are rendered as SearchHit-shaped sources (section="Knowledge
+Graph") so synthesis cites them with the same [Cn] labels and the guardrail
+validates them identically — one citation system, two evidence types.
+"""
+
+import os
+import uuid
+
+import structlog
+
+from ingestion.entity_extraction import RISK_TAXONOMY
+from retrieval.hybrid_search import SearchHit
+
+log = structlog.get_logger(__name__)
+
+NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_AUTH = (os.environ.get("NEO4J_USER", "neo4j"), os.environ.get("NEO4J_PASSWORD", "ledgerlens"))
+
+VALID_TOPICS = set(RISK_TAXONOMY)
+
+
+def _run(query: str, **params) -> list[dict]:
+    from neo4j import GraphDatabase
+
+    driver = GraphDatabase.driver(NEO4J_URI, auth=NEO4J_AUTH)
+    try:
+        with driver.session() as session:
+            return [dict(record) for record in session.run(query, **params)]
+    finally:
+        driver.close()
+
+
+def _fact_hit(text: str) -> SearchHit:
+    return SearchHit(
+        chunk_id=uuid.uuid4(),
+        filing_accession="knowledge-graph",
+        company_name="(graph fact)",
+        form_type="KG",
+        fiscal_year=None,
+        section="Knowledge Graph",
+        text=text,
+        ocr_confidence=None,
+        rrf_score=1.0,  # graph facts are exact, rank them first
+    )
+
+
+def companies_discussing(topic: str) -> list[SearchHit]:
+    if topic not in VALID_TOPICS:
+        return []
+    rows = _run(
+        """
+        MATCH (c:Company)-[:FILED]->(f:Filing)-[d:DISCUSSES]->(r:RiskFactor {topic: $topic})
+        RETURN c.name AS company, collect(DISTINCT f.form_type + ' FY' + toString(f.fiscal_year)) AS filings
+        ORDER BY company
+        """,
+        topic=topic,
+    )
+    if not rows:
+        return []
+    lines = [f"{r['company']} (in {', '.join(r['filings'])})" for r in rows]
+    text = f"Knowledge graph: companies whose filings discuss {topic} risk — " + "; ".join(lines)
+    return [_fact_hit(text)]
+
+
+def topics_for_company(company_name_fragment: str) -> list[SearchHit]:
+    rows = _run(
+        """
+        MATCH (c:Company)-[:FILED]->(f:Filing)-[d:DISCUSSES]->(r:RiskFactor)
+        WHERE toLower(c.name) CONTAINS toLower($fragment)
+        RETURN r.topic AS topic, sum(d.evidence_count) AS evidence
+        ORDER BY evidence DESC
+        """,
+        fragment=company_name_fragment,
+    )
+    if not rows:
+        return []
+    listing = ", ".join(f"{r['topic']} (evidence {r['evidence']})" for r in rows)
+    text = f"Knowledge graph: risk topics discussed in {company_name_fragment} filings — {listing}"
+    return [_fact_hit(text)]
+
+
+def companies_sharing_topics() -> list[SearchHit]:
+    rows = _run(
+        """
+        MATCH (a:Company)-[:FILED]->(:Filing)-[:DISCUSSES]->(r:RiskFactor)
+              <-[:DISCUSSES]-(:Filing)<-[:FILED]-(b:Company)
+        WHERE a.cik < b.cik
+        RETURN a.name AS company_a, b.name AS company_b, collect(DISTINCT r.topic) AS shared
+        ORDER BY size(shared) DESC LIMIT 5
+        """
+    )
+    if not rows:
+        return []
+    lines = [f"{r['company_a']} & {r['company_b']}: {', '.join(r['shared'])}" for r in rows]
+    text = "Knowledge graph: companies whose filings discuss the same risk topics — " + "; ".join(lines)
+    return [_fact_hit(text)]

@@ -53,7 +53,11 @@ class FakeEmbedder:
 
 @pytest.fixture
 def two_chunks(monkeypatch):
-    monkeypatch.setattr(graph_module, "gather_context", lambda queries, embedder: [_chunk("C1"), _chunk("C2")])
+    monkeypatch.setattr(
+        graph_module,
+        "gather_context",
+        lambda queries, embedder, extra_hits=None: [_chunk("C1"), _chunk("C2")],
+    )
 
 
 def test_happy_path_returns_cited_answer(two_chunks):
@@ -99,7 +103,7 @@ def test_persistent_violations_end_in_refusal_not_bad_answer(two_chunks):
 
 
 def test_no_retrieved_chunks_refuses_without_synthesis(monkeypatch):
-    monkeypatch.setattr(graph_module, "gather_context", lambda queries, embedder: [])
+    monkeypatch.setattr(graph_module, "gather_context", lambda queries, embedder, extra_hits=None: [])
     chat = ScriptedChat([{"sub_queries": ["something obscure"]}])
     result = ask("question about nothing indexed", chat, FakeEmbedder())
     assert result.refused

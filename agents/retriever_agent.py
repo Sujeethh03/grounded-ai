@@ -20,9 +20,13 @@ class LabeledChunk:
     hit: SearchHit
 
 
-def gather_context(sub_queries: list[str], embedder: Embedder) -> list[LabeledChunk]:
+def gather_context(
+    sub_queries: list[str], embedder: Embedder, extra_hits: list[SearchHit] | None = None
+) -> list[LabeledChunk]:
+    """`extra_hits` carries graph facts (rrf_score=1.0, so they sort first) —
+    they enter the same labeling/citation system as text chunks."""
     seen: set = set()
-    merged: list[SearchHit] = []
+    merged: list[SearchHit] = list(extra_hits or [])
     for query in sub_queries:
         for hit in hybrid_search(query, embedder, top_k=PER_QUERY_TOP_K):
             if hit.chunk_id in seen:
