@@ -14,8 +14,18 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import (
+    CheckConstraint,
+    Computed,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -73,15 +83,30 @@ class FilingSection(Base):
 
 
 class DocChunk(Base):
-    """M3: chunk + embedding, built from FilingSection text once chunking exists."""
+    """M3: chunk + embedding + lexical tsvector — one table serves both halves
+    of hybrid search (the reason we chose pgvector over a separate vector DB).
+    """
 
     __tablename__ = "doc_chunks"
+    __table_args__ = (
+        Index("ix_doc_chunks_text_tsv", "text_tsv", postgresql_using="gin"),
+        Index(
+            "ix_doc_chunks_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     filing_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("filings.id", ondelete="CASCADE"), index=True)
     section: Mapped[str] = mapped_column(String(255))
+    chunk_index: Mapped[int] = mapped_column(default=0)
     chunk_text: Mapped[str] = mapped_column(Text)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
+    text_tsv: Mapped[str | None] = mapped_column(
+        TSVECTOR, Computed("to_tsvector('english', chunk_text)", persisted=True), nullable=True
+    )
     ocr_confidence: Mapped[float | None] = mapped_column(Numeric(3, 2), nullable=True)
 
     filing: Mapped["Filing"] = relationship(back_populates="chunks")
