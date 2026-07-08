@@ -86,6 +86,10 @@ class IngestResponse(BaseModel):
 
 @app.post("/api/v1/ingest/{cik}", status_code=202, response_model=IngestResponse)
 def trigger_ingest(cik: str, limit: int = 5):
+    # Read-only deployments (no worker running) disable ingestion honestly
+    # instead of enqueueing jobs nothing will ever pick up.
+    if os.environ.get("INGEST_ENABLED", "1") != "1":
+        raise HTTPException(status_code=503, detail="Ingestion is disabled in this deployment (read-only demo)")
     if not cik.isdigit():
         raise HTTPException(status_code=422, detail="CIK must be numeric")
     from ingestion.tasks import ingest_company_task
