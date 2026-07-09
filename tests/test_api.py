@@ -1,5 +1,5 @@
 """API tests — network-free: Celery enqueue and the agent pipeline are mocked;
-/healthz and /metrics are exercised for real. /readyz and /api/v1/filings need
+/healthz and /metrics are exercised for real. /readyz and /api/v1/documents need
 live Postgres/Redis so they're covered by the manual end-to-end run, not here
 (CI has neither service yet — see ci.yml note)."""
 
@@ -26,14 +26,14 @@ def test_metrics_exposes_prometheus_format():
 
 
 def test_ingest_rejects_non_numeric_cik():
-    response = client.post("/api/v1/ingest/not-a-cik")
+    response = client.post("/api/v1/ingest/sec/not-a-cik")
     assert response.status_code == 422
 
 
 def test_ingest_enqueues_task():
     with patch("ingestion.tasks.ingest_company_task.delay") as mock_delay:
         mock_delay.return_value.id = "fake-task-id"
-        response = client.post("/api/v1/ingest/320193?limit=3")
+        response = client.post("/api/v1/ingest/sec/320193?limit=3")
     assert response.status_code == 202
     assert response.json() == {"task_id": "fake-task-id", "status": "queued"}
     mock_delay.assert_called_once_with("320193", limit=3)

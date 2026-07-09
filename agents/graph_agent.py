@@ -41,10 +41,10 @@ def _run(query: str, **params) -> list[dict]:
 def _fact_hit(text: str) -> SearchHit:
     return SearchHit(
         chunk_id=uuid.uuid4(),
-        filing_accession="knowledge-graph",
-        company_name="(graph fact)",
-        form_type="KG",
-        fiscal_year=None,
+        source_key="knowledge-graph",
+        entity_name="(graph fact)",
+        doc_type="KG",
+        year=None,
         section="Knowledge Graph",
         text=text,
         ocr_confidence=None,

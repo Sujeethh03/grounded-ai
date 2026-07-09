@@ -31,10 +31,10 @@ def index_filings_task(self) -> dict[str, int]:
     # Imported here so the worker only needs an OpenAI key when this task
     # actually runs, not at import time.
     from retrieval.embeddings import OpenAIEmbedder
-    from retrieval.indexer import index_pending_filings
+    from retrieval.indexer import index_pending_documents
 
     try:
-        return index_pending_filings(OpenAIEmbedder())
+        return index_pending_documents(OpenAIEmbedder())
     except Exception as exc:
         log.error("index_task_failed", attempt=self.request.retries, error=str(exc))
         raise self.retry(exc=exc)

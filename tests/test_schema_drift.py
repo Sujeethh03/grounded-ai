@@ -2,10 +2,10 @@ from ingestion.normalize import NormalizedDocument, NormalizedSection
 from ingestion.schema_drift import check_structure
 
 
-def _doc(form_type: str, sections: list[tuple[str, int]]) -> NormalizedDocument:
+def _doc(doc_type: str, sections: list[tuple[str, int]]) -> NormalizedDocument:
     return NormalizedDocument(
-        accession_number="acc",
-        form_type=form_type,
+        source_key="acc",
+        doc_type=doc_type,
         sections=[
             NormalizedSection(name=name, index=i, text="x" * chars)
             for i, (name, chars) in enumerate(sections)
@@ -39,8 +39,8 @@ def test_8k_with_single_full_text_section_is_ok():
     assert check_structure(doc).ok
 
 
-def test_unknown_form_type_is_flagged():
+def test_unknown_doc_type_is_flagged():
     doc = _doc("S-1", [("Full Text", 10_000)])
     result = check_structure(doc)
     assert not result.ok
-    assert "unknown form type" in result.reason
+    assert "unknown document type" in result.reason

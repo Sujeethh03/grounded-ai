@@ -10,7 +10,8 @@ from pydantic import BaseModel
 from agents.llm import SYNTHESIS_MODEL, Chat, structured_call
 from agents.retriever_agent import LabeledChunk
 
-SYSTEM = """You answer questions about SEC filings using ONLY the provided source chunks.
+SYSTEM = """You answer questions about source documents (SEC filings, FDA drug labels)
+using ONLY the provided source chunks.
 Return JSON: {"answer": "..."}.
 Hard rules:
 - Every sentence in the answer MUST end with at least one citation like [C1] or [C2][C3].
@@ -30,8 +31,9 @@ def _render_context(chunks: list[LabeledChunk]) -> str:
     for c in chunks:
         h = c.hit
         ocr_note = f" (OCR text, confidence {h.ocr_confidence})" if h.ocr_confidence is not None else ""
+        year_note = f" FY{h.year}" if h.year is not None else ""
         blocks.append(
-            f"[{c.label}] {h.company_name} {h.form_type} FY{h.fiscal_year} — {h.section}{ocr_note}\n{h.text}"
+            f"[{c.label}] {h.entity_name} {h.doc_type}{year_note} — {h.section}{ocr_note}\n{h.text}"
         )
     return "\n\n---\n\n".join(blocks)
 

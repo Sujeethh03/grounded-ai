@@ -20,10 +20,10 @@ class FakeEmbedder:
 def _graph_fact(text: str) -> SearchHit:
     return SearchHit(
         chunk_id=uuid.uuid4(),
-        filing_accession="knowledge-graph",
-        company_name="(graph fact)",
-        form_type="KG",
-        fiscal_year=None,
+        source_key="knowledge-graph",
+        entity_name="(graph fact)",
+        doc_type="KG",
+        year=None,
         section="Knowledge Graph",
         text=text,
         ocr_confidence=None,
@@ -36,8 +36,8 @@ def test_graph_facts_sort_first_and_get_labels(monkeypatch):
         "agents.retriever_agent.hybrid_search",
         lambda q, e, top_k: [
             SearchHit(
-                chunk_id=uuid.uuid4(), filing_accession="a", company_name="Apple", form_type="10-Q",
-                fiscal_year=2026, section="Item 1A", text="text chunk", ocr_confidence=None, rrf_score=0.02,
+                chunk_id=uuid.uuid4(), source_key="a", entity_name="Apple", doc_type="10-Q",
+                year=2026, section="Item 1A", text="text chunk", ocr_confidence=None, rrf_score=0.02,
             )
         ],
     )

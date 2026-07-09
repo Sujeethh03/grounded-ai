@@ -36,8 +36,12 @@ class NormalizedSection:
 
 @dataclass(frozen=True)
 class NormalizedDocument:
-    accession_number: str
-    form_type: str
+    """Source-agnostic normalization output — every source adapter (SEC HTML,
+    openFDA JSON, OCR fallback) produces this same shape, which is what lets
+    drift-checking, persistence, and indexing stay source-blind."""
+
+    source_key: str
+    doc_type: str
     sections: list[NormalizedSection]
 
 
@@ -75,4 +79,4 @@ def _split_into_sections(text: str) -> list[NormalizedSection]:
 def normalize_filing(raw_html: str, form_type: str, accession_number: str) -> NormalizedDocument:
     text = _html_to_text(raw_html)
     sections = _split_into_sections(text)
-    return NormalizedDocument(accession_number=accession_number, form_type=form_type, sections=sections)
+    return NormalizedDocument(source_key=accession_number, doc_type=form_type, sections=sections)

@@ -39,18 +39,18 @@ def check_structure(doc: NormalizedDocument) -> DriftCheck:
     if total_chars < MIN_TOTAL_CHARS:
         return DriftCheck(ok=False, reason=f"near-empty parse: {total_chars} chars total")
 
-    expected_min = MIN_SECTIONS.get(doc.form_type)
+    expected_min = MIN_SECTIONS.get(doc.doc_type)
     if expected_min is None:
-        # Unknown form type is itself a kind of drift — we're parsing something
-        # the pipeline was never designed for.
-        return DriftCheck(ok=False, reason=f"unknown form type: {doc.form_type}")
+        # Unknown document type is itself a kind of drift — we're parsing
+        # something the pipeline was never designed for.
+        return DriftCheck(ok=False, reason=f"unknown document type: {doc.doc_type}")
 
     item_sections = [s for s in doc.sections if s.name != "Full Text"]
     if len(item_sections) < expected_min:
         return DriftCheck(
             ok=False,
             reason=(
-                f"{doc.form_type} parsed into {len(item_sections)} Item sections, "
+                f"{doc.doc_type} parsed into {len(item_sections)} Item sections, "
                 f"expected >= {expected_min} — header structure not recognized"
             ),
         )

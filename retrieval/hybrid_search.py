@@ -18,7 +18,7 @@ from dataclasses import dataclass
 import structlog
 from sqlalchemy import func, select
 
-from db.models import DocChunk, Filing
+from db.models import DocChunk, Document
 from db.session import get_session
 from retrieval.embeddings import Embedder
 
@@ -32,10 +32,10 @@ DEFAULT_TOP_K = 8
 @dataclass(frozen=True)
 class SearchHit:
     chunk_id: uuid.UUID
-    filing_accession: str
-    company_name: str
-    form_type: str
-    fiscal_year: int | None
+    source_key: str  # SEC accession number / openFDA set_id — what citations resolve to
+    entity_name: str  # company or drug name
+    doc_type: str
+    year: int | None
     section: str
     text: str
     ocr_confidence: float | None
@@ -79,26 +79,26 @@ def hybrid_search(query: str, embedder: Embedder, top_k: int = DEFAULT_TOP_K) ->
             return []
 
         rows = session.execute(
-            select(DocChunk, Filing)
-            .join(Filing, DocChunk.filing_id == Filing.id)
+            select(DocChunk, Document)
+            .join(Document, DocChunk.document_id == Document.id)
             .where(DocChunk.id.in_(top_ids))
         ).all()
-        by_id = {chunk.id: (chunk, filing) for chunk, filing in rows}
+        by_id = {chunk.id: (chunk, document) for chunk, document in rows}
 
         hits = [
             SearchHit(
                 chunk_id=chunk.id,
-                filing_accession=filing.accession_number,
-                company_name=filing.company_name,
-                form_type=filing.form_type,
-                fiscal_year=filing.fiscal_year,
+                source_key=document.source_key,
+                entity_name=document.entity_name,
+                doc_type=document.doc_type,
+                year=document.year,
                 section=chunk.section,
                 text=chunk.chunk_text,
                 ocr_confidence=float(chunk.ocr_confidence) if chunk.ocr_confidence is not None else None,
                 rrf_score=round(fused[chunk_id], 5),
             )
             for chunk_id in top_ids
-            for chunk, filing in [by_id[chunk_id]]
+            for chunk, document in [by_id[chunk_id]]
         ]
         log.info("hybrid_search_done", query=query, lexical=len(lexical_ids), dense=len(dense_ids), returned=len(hits))
         return hits

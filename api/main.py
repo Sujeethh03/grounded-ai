@@ -1,13 +1,12 @@
-"""FastAPI application — the dossier's Ledger Lens API surface (minus M4 graph
-routes, deferred with Neo4j).
+"""FastAPI application — the GroundedAI API surface.
 
 Endpoints:
     GET  /healthz                       liveness (process is up, nothing else)
     GET  /readyz                        readiness — real DB + Redis checks
     GET  /metrics                       Prometheus scrape
-    POST /api/v1/ingest/{cik}           enqueue async ingestion -> 202 + task id
+    POST /api/v1/ingest/sec/{cik}       enqueue async SEC ingestion -> 202 + task id
     GET  /api/v1/tasks/{task_id}        Celery task status/result
-    GET  /api/v1/filings                filings + ingestion_status (drift/OCR visible here)
+    GET  /api/v1/documents              documents + ingestion_status (drift/OCR visible here)
     POST /api/v1/query                  full agent pipeline -> cited answer
 """
 
@@ -25,13 +24,13 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_
 from pydantic import BaseModel, Field  # noqa: E402
 from sqlalchemy import select, text  # noqa: E402
 
-from db.models import Filing  # noqa: E402
+from db.models import Document  # noqa: E402
 from db.session import get_session  # noqa: E402
 
 structlog.configure(processors=[structlog.processors.TimeStamper(fmt="iso"), structlog.processors.JSONRenderer()])
 log = structlog.get_logger(__name__)
 
-app = FastAPI(title="Ledger Lens", version="0.1.0")
+app = FastAPI(title="GroundedAI", version="0.2.0")
 
 REQUEST_COUNT = Counter("http_requests_total", "HTTP requests", ["method", "path", "status"])
 REQUEST_LATENCY = Histogram("http_request_duration_seconds", "Request latency", ["method", "path"])
@@ -84,8 +83,8 @@ class IngestResponse(BaseModel):
     status: str = "queued"
 
 
-@app.post("/api/v1/ingest/{cik}", status_code=202, response_model=IngestResponse)
-def trigger_ingest(cik: str, limit: int = 5):
+@app.post("/api/v1/ingest/sec/{cik}", status_code=202, response_model=IngestResponse)
+def trigger_sec_ingest(cik: str, limit: int = 5):
     # Read-only deployments (no worker running) disable ingestion honestly
     # instead of enqueueing jobs nothing will ever pick up.
     if os.environ.get("INGEST_ENABLED", "1") != "1":
@@ -112,22 +111,26 @@ def task_status(task_id: str):
     return payload
 
 
-@app.get("/api/v1/filings")
-def list_filings():
+@app.get("/api/v1/documents")
+def list_documents(source_type: str | None = None):
     with get_session() as session:
-        filings = session.scalars(select(Filing).order_by(Filing.filing_date.desc())).all()
+        query = select(Document).order_by(Document.published_at.desc().nulls_last())
+        if source_type:
+            query = query.where(Document.source_type == source_type)
+        documents = session.scalars(query).all()
         return [
             {
-                "id": str(f.id),
-                "company": f.company_name,
-                "cik": f.company_cik,
-                "form_type": f.form_type,
-                "fiscal_year": f.fiscal_year,
-                "accession_number": f.accession_number,
-                "ingestion_status": f.ingestion_status,
-                "ocr_confidence": float(f.ocr_confidence) if f.ocr_confidence is not None else None,
+                "id": str(d.id),
+                "source_type": d.source_type,
+                "entity": d.entity_name,
+                "entity_id": d.entity_id,
+                "doc_type": d.doc_type,
+                "year": d.year,
+                "source_key": d.source_key,
+                "ingestion_status": d.ingestion_status,
+                "ocr_confidence": float(d.ocr_confidence) if d.ocr_confidence is not None else None,
             }
-            for f in filings
+            for d in documents
         ]
 
 
@@ -158,11 +161,11 @@ def query(body: QueryRequest):
         sources=[
             {
                 "label": c.label,
-                "company": c.hit.company_name,
-                "form_type": c.hit.form_type,
-                "fiscal_year": c.hit.fiscal_year,
+                "entity": c.hit.entity_name,
+                "doc_type": c.hit.doc_type,
+                "year": c.hit.year,
                 "section": c.hit.section,
-                "accession_number": c.hit.filing_accession,
+                "source_key": c.hit.source_key,
             }
             for c in result.citations
         ],

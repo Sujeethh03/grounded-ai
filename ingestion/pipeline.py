@@ -7,8 +7,8 @@ pipeline is later scope (see PROGRESS.md) — don't reach for the queue before
 the underlying logic is proven.
 
 Chunking + embedding (M3) and the graph loader (M4) are not wired in here;
-this only gets filings into `filings` + `filing_sections`, which is the whole
-M1 milestone per the dossier.
+this only gets filings into `documents` + `document_sections` (the SEC arm of
+the now multi-source schema), which is the whole M1 milestone per the dossier.
 """
 
 from datetime import datetime, timezone
@@ -17,7 +17,7 @@ import httpx
 import structlog
 from sqlalchemy import select
 
-from db.models import Filing, FilingSection, IngestionStatus
+from db.models import Document, DocumentSection, IngestionStatus, SourceType
 from db.session import get_session
 from ingestion.fetch_edgar import EDGARFetchFailed, fetch_filing_document, filing_source_url, get_company_filings
 from ingestion.normalize import NormalizedDocument, NormalizedSection, normalize_filing
@@ -48,25 +48,26 @@ async def ingest_company(cik: str, limit: int = 5) -> dict[str, int]:
 
         for meta in metas:
             with get_session() as session:
-                existing = session.scalar(select(Filing).where(Filing.accession_number == meta.accession_number))
+                existing = session.scalar(select(Document).where(Document.source_key == meta.accession_number))
                 if existing:
                     summary["skipped_existing"] += 1
                     log.info("filing_already_ingested", accession=meta.accession_number)
                     continue
 
                 report_date = _parse_date(meta.report_date)
-                filing = Filing(
-                    company_cik=meta.cik,
-                    company_name=meta.company_name,
-                    form_type=meta.form_type,
-                    accession_number=meta.accession_number,
-                    fiscal_year=report_date.year if report_date else None,
-                    filing_date=_parse_date(meta.filing_date),
+                document = Document(
+                    source_type=SourceType.SEC_FILING.value,
+                    entity_id=meta.cik,
+                    entity_name=meta.company_name,
+                    doc_type=meta.form_type,
+                    source_key=meta.accession_number,
+                    year=report_date.year if report_date else None,
+                    published_at=_parse_date(meta.filing_date),
                     source_url=filing_source_url(meta),
                     ingestion_status=IngestionStatus.PENDING.value,
                 )
-                session.add(filing)
-                session.flush()  # assigns filing.id for the FilingSection FK below
+                session.add(document)
+                session.flush()  # assigns document.id for the DocumentSection FK below
 
                 try:
                     raw = await fetch_filing_document(meta, client=client)
@@ -75,12 +76,12 @@ async def ingest_company(cik: str, limit: int = 5) -> dict[str, int]:
                         # M2 OCR path: scanned/PDF-only document, no HTML to parse.
                         ocr = extract_text_via_ocr(raw)
                         doc = NormalizedDocument(
-                            accession_number=meta.accession_number,
-                            form_type=meta.form_type,
+                            source_key=meta.accession_number,
+                            doc_type=meta.form_type,
                             sections=[NormalizedSection(name="Full Text (OCR)", index=0, text=ocr.text)],
                         )
-                        filing.ingestion_status = IngestionStatus.OCR_FALLBACK.value
-                        filing.ocr_confidence = ocr.confidence
+                        document.ingestion_status = IngestionStatus.OCR_FALLBACK.value
+                        document.ocr_confidence = ocr.confidence
                         log.info(
                             "filing_routed_to_ocr",
                             accession=meta.accession_number,
@@ -94,7 +95,7 @@ async def ingest_company(cik: str, limit: int = 5) -> dict[str, int]:
                         if not drift.ok:
                             # Keep the sections for triage, but never let a bad
                             # parse flow silently into the index (M3 skips these).
-                            filing.ingestion_status = IngestionStatus.SCHEMA_DRIFT_FLAGGED.value
+                            document.ingestion_status = IngestionStatus.SCHEMA_DRIFT_FLAGGED.value
                             log.warning(
                                 "filing_schema_drift_flagged",
                                 accession=meta.accession_number,
@@ -103,24 +104,24 @@ async def ingest_company(cik: str, limit: int = 5) -> dict[str, int]:
 
                     for section in doc.sections:
                         session.add(
-                            FilingSection(
-                                filing_id=filing.id,
+                            DocumentSection(
+                                document_id=document.id,
                                 section_name=section.name,
                                 section_index=section.index,
                                 text=section.text,
                             )
                         )
-                    filing.ingested_at = datetime.now(timezone.utc)
+                    document.ingested_at = datetime.now(timezone.utc)
                     summary["succeeded"] += 1
                     log.info(
                         "filing_ingested",
                         accession=meta.accession_number,
                         form_type=meta.form_type,
-                        status=filing.ingestion_status,
+                        status=document.ingestion_status,
                         sections=len(doc.sections),
                     )
                 except EDGARFetchFailed as exc:
-                    filing.ingestion_status = IngestionStatus.FAILED.value
+                    document.ingestion_status = IngestionStatus.FAILED.value
                     summary["failed"] += 1
                     log.error("filing_ingest_failed", accession=meta.accession_number, error=str(exc))
 

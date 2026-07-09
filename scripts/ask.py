@@ -19,7 +19,7 @@ structlog.configure(processors=[structlog.dev.ConsoleRenderer()])
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Ask a question over indexed SEC filings.")
+    parser = argparse.ArgumentParser(description="Ask a cited question over indexed documents.")
     parser.add_argument("question")
     args = parser.parse_args()
 
@@ -30,7 +30,8 @@ def main() -> None:
         print("SOURCES:")
         for c in result.citations:
             h = c.hit
-            print(f"  [{c.label}] {h.company_name} {h.form_type} FY{h.fiscal_year} — {h.section} ({h.filing_accession})")
+            year_note = f" FY{h.year}" if h.year is not None else ""
+            print(f"  [{c.label}] {h.entity_name} {h.doc_type}{year_note} — {h.section} ({h.source_key})")
 
 
 if __name__ == "__main__":

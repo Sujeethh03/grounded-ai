@@ -20,7 +20,7 @@ import structlog
 from neo4j import GraphDatabase
 from sqlalchemy import select
 
-from db.models import Filing, FilingSection
+from db.models import Document, DocumentSection, SourceType
 from db.session import get_session
 from ingestion.entity_extraction import extract_topics
 
@@ -41,7 +41,12 @@ def load_graph() -> dict[str, int]:
     summary = {"companies": 0, "filings": 0, "discusses_edges": 0}
 
     with get_session() as session, driver.session() as neo:
-        filings = session.scalars(select(Filing).where(Filing.ingestion_status == "indexed")).all()
+        filings = session.scalars(
+            select(Document).where(
+                Document.ingestion_status == "indexed",
+                Document.source_type == SourceType.SEC_FILING.value,
+            )
+        ).all()
 
         for filing in filings:
             neo.run(
@@ -52,16 +57,16 @@ def load_graph() -> dict[str, int]:
                   ON CREATE SET f.form_type = $form_type, f.fiscal_year = $fiscal_year
                 MERGE (c)-[:FILED]->(f)
                 """,
-                cik=filing.company_cik,
-                name=filing.company_name,
-                accession=filing.accession_number,
-                form_type=filing.form_type,
-                fiscal_year=filing.fiscal_year,
+                cik=filing.entity_id,
+                name=filing.entity_name,
+                accession=filing.source_key,
+                form_type=filing.doc_type,
+                fiscal_year=filing.year,
             )
             summary["filings"] += 1
 
             sections = session.scalars(
-                select(FilingSection).where(FilingSection.filing_id == filing.id)
+                select(DocumentSection).where(DocumentSection.document_id == filing.id)
             ).all()
             risk_text = "\n".join(
                 s.text for s in sections if any(hint in s.section_name.lower() for hint in RISK_SECTION_HINTS)
@@ -77,7 +82,7 @@ def load_graph() -> dict[str, int]:
                     MERGE (f)-[d:DISCUSSES]->(r)
                       SET d.evidence_count = $evidence
                     """,
-                    accession=filing.accession_number,
+                    accession=filing.source_key,
                     topic=match.topic,
                     evidence=match.evidence_count,
                 )
