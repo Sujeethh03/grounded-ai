@@ -8,3 +8,13 @@
 {"id": "q8", "question": "What does Microsoft's latest 10-K say about AI competition?", "category": "unanswerable", "expected_keywords": []}
 {"id": "q9", "question": "What dividend did Apple pay in 1997?", "category": "unanswerable", "expected_keywords": []}
 {"id": "q10", "question": "Summarize Apple's stock repurchase activity from its recent quarterly filings.", "category": "answerable", "expected_keywords": ["repurchase"]}
+{"id": "q11", "question": "What does the warfarin label say about bleeding risk?", "category": "answerable", "expected_keywords": ["bleeding"]}
+{"id": "q12", "question": "What warnings does the ibuprofen label give about stomach bleeding?", "category": "answerable", "expected_keywords": ["stomach"]}
+{"id": "q13", "question": "What conditions is lisinopril indicated to treat according to its label?", "category": "answerable", "expected_keywords": ["hypertension"]}
+{"id": "q14", "question": "What does the metformin label say about lactic acidosis?", "category": "answerable", "expected_keywords": ["lactic"]}
+{"id": "q15", "question": "Which drugs in the corpus have labeled interactions with warfarin?", "category": "answerable", "expected_keywords": ["aspirin"]}
+{"id": "q16", "question": "Which drugs that treat pain have a labeled interaction with warfarin?", "category": "answerable", "expected_keywords": ["aspirin", "ibuprofen"]}
+{"id": "q17", "question": "What is the recommended pediatric dosage of acetaminophen?", "category": "unanswerable", "expected_keywords": []}
+{"id": "q18", "question": "What does the sertraline label say about withdrawal symptoms?", "category": "unanswerable", "expected_keywords": []}
+{"id": "q19", "question": "How much does warfarin cost per tablet?", "category": "unanswerable", "expected_keywords": []}
+{"id": "q20", "question": "What conditions is fluoxetine indicated to treat according to its label?", "category": "answerable", "expected_keywords": ["depress"]}
