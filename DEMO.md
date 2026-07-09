@@ -1,6 +1,6 @@
-# Interview Demo Runbook
+# Interview Demo Runbook — GroundedAI
 
-Two demo paths. Practice Path A once tonight; keep Path B warm as the fallback.
+Two demo paths. Practice Path A once; keep Path B warm as the fallback once deployed.
 **Rule: never debug live in an interview.** If something breaks, switch paths and keep talking.
 
 ## Path A — local full stack (everything works today; zero dependencies on cloud)
@@ -9,8 +9,8 @@ Two demo paths. Practice Path A once tonight; keep Path B warm as the fallback.
 
 ```bash
 brew services start postgresql@17 redis neo4j     # all three must be running
-cd ~/ledger-lens && source .venv/bin/activate
-pytest -q                                          # 46 passed = green light
+cd ~/ledger-lens && source .venv/bin/activate     # (folder rename pending)
+pytest -q                                          # 64 passed = green light
 celery -A ingestion.celery_app worker --loglevel=warning &   # terminal 1
 uvicorn api.main:app --port 8000 &                            # terminal 2
 curl -s localhost:8000/readyz                      # {"status":"ready",...}
@@ -18,47 +18,62 @@ curl -s localhost:8000/readyz                      # {"status":"ready",...}
 
 ### The 5-minute demo arc (in this order — it tells a story)
 
-1. **Async ingestion** — "the system pulls real SEC filings through a queue":
-   ```bash
-   curl -s -X POST "localhost:8000/api/v1/ingest/1018724?limit=3"   # Amazon — new company, live
-   curl -s localhost:8000/api/v1/tasks/<task_id-from-above>
-   curl -s localhost:8000/api/v1/filings | python3 -m json.tool | head -30
-   ```
-   Say: webhook-style 202-immediately, Celery worker does the slow work, idempotent by
-   accession number, rate-limited to SEC's fair-access limit with backoff + retries.
+1. **The one-liner**: "GroundedAI answers questions over FDA drug labels and SEC filings.
+   Every sentence it produces is verified against a real source by a separate deterministic
+   guardrail — it cites, or it refuses. In the drug domain a hallucinated answer isn't just
+   wrong, it's dangerous, which is why the architecture is built around refusal."
 
-2. **Cited agent answer** — the headline:
+2. **Cited drug answer** — the headline:
    ```bash
-   python -m scripts.ask "What supply chain risks does Apple disclose in its recent filings?"
+   python -m scripts.ask "What does the warfarin label say about interactions with NSAIDs like ibuprofen?"
    ```
-   Say: planner decomposes → hybrid search (BM25 + pgvector fused with RRF) → synthesis must
-   cite every sentence → a deterministic guardrail verifies every citation or the answer is
-   refused. Point at the [Cn] labels mapping to real accession numbers.
+   Say: planner decomposes → hybrid search (BM25 + pgvector fused with RRF) over real openFDA
+   label text → synthesis must cite every sentence → deterministic guardrail verifies every
+   [Cn] or the answer is refused. Point at citations resolving to real label set_ids.
 
-3. **The graph arm** — cross-company question:
+3. **The graph multi-hop** — what plain RAG can't do:
    ```bash
-   python -m scripts.ask "Which companies discuss supply chain risks in their filings?"
+   python -m scripts.ask "Which drugs that treat pain have a labeled interaction with warfarin?"
    ```
-   Say: planner routed this to Neo4j — parameterized Cypher only, no LLM-written queries —
-   and the graph fact enters the same citation system as text chunks.
+   Say: this is a whole-corpus join — treats X AND interacts with Y — top-k retrieval
+   structurally can't answer it. The planner routed it to Neo4j: parameterized Cypher only,
+   no LLM-written queries; extraction into the graph is deterministic (lexicon from the
+   corpus's own metadata), so the graph can't hallucinate; the fact enters the same [Cn]
+   citation system. Expected: "Aspirin and Ibuprofen [C1]".
 
 4. **Refusal** — the thing most RAG demos can't do:
    ```bash
-   python -m scripts.ask "What was Tesla's total revenue in fiscal year 2019?"
+   python -m scripts.ask "What is the recommended pediatric dosage of acetaminophen?"
    ```
-   Say: not in the corpus → the system says so instead of hallucinating. Eval numbers:
-   refusal_correctness 0.90, citation_validity 1.00 on a 10-case golden set, gate-checked.
+   Say: acetaminophen isn't in the corpus → the system says so instead of hallucinating a
+   dosage. Eval: refusal_correctness 0.95, citation_validity 1.00 on a 20-case golden set,
+   gate-checked in the harness.
 
-5. **Production surface** (if time): `curl localhost:8000/metrics | head`, show
-   Prometheus counters; mention structured JSON logs, /readyz dependency checks, CI history
-   including the three red runs (tesseract missing on the runner — environment parity lesson).
+5. **Source-agnosticism** — the platform claim, proven in one command:
+   ```bash
+   python -m scripts.ask "What supply chain risks does Apple disclose in its filings?"
+   ```
+   Say: same pipeline, same guardrail, completely different domain — SEC filings with OCR
+   fallback and schema-drift detection. The document store is source-agnostic
+   (`documents.source_type`); adding a source is one adapter (fetch + normalize + drift
+   expectations), roughly 3 files.
 
-## Path B — cloud URL (Railway)
+6. **Async ingestion + production surface** (if time):
+   ```bash
+   curl -s -X POST "localhost:8000/api/v1/ingest/drug/naproxen?limit=1"   # live, new drug
+   curl -s localhost:8000/api/v1/tasks/<task_id-from-above>
+   curl -s "localhost:8000/api/v1/documents?source_type=drug_label" | python3 -m json.tool | head
+   curl -s localhost:8000/metrics | head
+   ```
+   Say: 202-immediately, Celery worker does the slow work, idempotent by set_id+version
+   (label revisions replace, not duplicate), openFDA rate-limited with backoff; Prometheus
+   counters, structured JSON logs, /readyz does real dependency checks.
+
+## Path B — cloud URL (Railway; NOT DEPLOYED YET)
 
 Same arc, swap `localhost:8000` for the Railway URL. **Warm it up 10 minutes before the
 interview** (hit /readyz and one /query). If the cloud misbehaves mid-demo: "let me show you
-on the local stack — same containers, same compose file" → Path A. That sentence sounds
-senior, not embarrassed.
+on the local stack — same containers" → Path A.
 
 ## Questions to expect (short answers you must own)
 
@@ -69,17 +84,27 @@ senior, not embarrassed.
 - **Why is the guardrail deterministic?** The writer and checker must be different systems;
   a regex over [Cn] labels can't be sweet-talked. Semantic support-checking is the known
   next layer.
-- **Why no LLM-written Cypher?** The graph is the auditable arm — parameterized queries
-  can't hallucinate structure. Flexibility lives in the text-RAG arm.
+- **Why no LLM anywhere near the graph?** The graph is the auditable arm — deterministic
+  lexicon/taxonomy extraction in, parameterized Cypher out. It can't hallucinate structure
+  or facts. Flexibility lives in the text-RAG arm.
+- **Why is the multi-hop query the graph's justification?** "Treats X and interacts with Y"
+  requires checking every drug in the corpus and joining two facts per drug. Top-k similarity
+  retrieval returns the k most similar chunks — it structurally cannot enumerate-and-join.
+- **Why did you pivot domains mid-project?** The architecture was domain-agnostic on paper;
+  the pivot proved it in practice (the adapter was ~3 files). Drug labels also make the
+  refusal guarantee visceral and the graph query answerable without extra document types.
+- **How do you handle label revisions?** openFDA labels revise in place (same set_id, higher
+  version) — ingestion skips same-version, replaces newer-version (cascade wipes stale chunks).
 - **What breaks at 100x scale?** Embedding cost (cache + incremental), Postgres HNSW memory
-  (partition by year/company), per-tenant rate limiting on the API, worker autoscaling by
-  queue depth.
-- **What's honestly unfinished?** Reranking (baseline measured first, deliberately),
-  semantic support-check, Person nodes need DEF 14A ingestion, one eval case over-refuses.
-  Saying this unprompted builds more trust than hiding it.
+  (partition by source/year), per-tenant rate limiting on the API, worker autoscaling by
+  queue depth, lexicon matching goes O(drugs×labels) — swap to Aho-Corasick.
+- **What's honestly unfinished?** Reranking (baseline measured first, deliberately), semantic
+  support-check, RAGAS, deployment, one SEC eval case over-refuses, lexical arm zero-hits on
+  full-question queries. Saying this unprompted builds more trust than hiding it.
 
-## Tonight, after deploy: read the code
+## Before any interview: read the code
 
-30 minutes minimum: `agents/graph.py` → `agents/guardrail_agent.py` →
-`retrieval/hybrid_search.py` → `ingestion/pipeline.py`. Every docstring contains the "why"
-for that module. If you can re-draw the graph flow from memory on paper, you're ready.
+30 minutes minimum, in this order: `agents/graph.py` → `agents/guardrail_agent.py` →
+`retrieval/hybrid_search.py` → `ingestion/graph_loader.py` → `ingestion/pipeline.py`.
+Every docstring contains the "why" for that module. If you can re-draw the two-lane
+(ingest/query) flow from memory on paper, you're ready.

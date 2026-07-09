@@ -22,7 +22,7 @@ log = structlog.get_logger(__name__)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Ingest a company's recent SEC filings into Ledger Lens.")
+    parser = argparse.ArgumentParser(description="Ingest a company's recent SEC filings into GroundedAI.")
     parser.add_argument("--cik", required=True, help="SEC CIK number, with or without leading zeros")
     parser.add_argument("--limit", type=int, default=5, help="Max filings to ingest this run")
     args = parser.parse_args()

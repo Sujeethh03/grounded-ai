@@ -1,78 +1,93 @@
-# Ledger Lens
+# GroundedAI — A Verifiable Agentic Retrieval Platform
 
-Multi-source financial-document intelligence pipeline: SEC filings (10-K/10-Q/8-K/earnings
-transcripts) ingested through a fault-tolerant pipeline (OCR fallback for scanned exhibits,
-schema-drift detection for changing SEC form fields), indexed with hybrid RAG (BM25 + vector +
-reranking), and reasoned over by a multi-agent pipeline with a small, deliberately-scoped Neo4j
-knowledge graph on top, enforcing citation-grounded answers only.
+Citation-grounded question answering over regulated documents, currently two sources:
+**FDA drug labels** (openFDA — the headline domain) and **SEC filings** (EDGAR — the original
+domain, kept as proof the architecture is source-agnostic). One fault-tolerant ingestion
+pipeline (retry/backoff, OCR fallback, schema-drift detection), hybrid RAG (BM25 + vector +
+RRF), a multi-agent LangGraph pipeline, and a small, deliberately-scoped Neo4j knowledge
+graph — enforcing citation-grounded answers only: every sentence cites a real chunk or graph
+fact, or the system refuses.
 
-**Why this project exists:** replaces a group project ("Signify") on the resume that couldn't be
-defended in an interview. Every line of this must be built solo and understood end-to-end — see
-"Non-negotiables" below before adding anything.
+**Why this project exists:** replaces a group project ("Signify") on the resume that couldn't
+be defended in an interview. Every line of this must be built solo and understood end-to-end —
+see "Non-negotiables" below before adding anything.
 
-**Full spec (architecture, schemas, API design, sequence diagrams, milestones, eval strategy,
-interview prep):** the "Ledger Lens" section of the Portfolio Dossier artifact —
-https://claude.ai/code/artifact/fe962bed-b7aa-4334-8893-90dc5c8c070f — treat that as the source of
-truth for design decisions; this file tracks what's actually been built against that plan.
+**History note (2026-07-10):** the project began as "Ledger Lens", SEC-only, per the
+[Portfolio Dossier](https://claude.ai/code/artifact/fe962bed-b7aa-4334-8893-90dc5c8c070f).
+The pivot to drug labels as the headline domain (with SEC kept as second source) is a
+deliberate, recorded divergence: the drug domain makes the refusal guarantee visceral
+(a hallucinated interaction is dangerous, not just wrong), its multi-hop graph query works
+without extra ingestion (the SEC one needed DEF 14A proxy statements), and two unrelated
+domains on one pipeline prove the design better than either alone. The dossier remains the
+source of truth for *architecture* decisions; domain-specific sections read through the lens
+of this note.
 
 ## Start here every session
 
 1. Read `PROGRESS.md` for current status and next step.
 2. Run `git log --oneline -20` to see what actually landed (more reliable than any summary).
-3. Check the milestone table in the dossier (§5 Development plan under Ledger Lens) for what M-number comes next.
 
 ## Architecture at a glance
 
 ```
-SEC EDGAR API → fetch_filing (retry+backoff, dead-letter on exhaustion)
-   → source normalization (10-K/10-Q/8-K/transcript → unified schema)
-   → Docling parse (or Tesseract OCR fallback for scanned exhibits)
-   → schema-drift detector (known parser vs. best-effort fallback + alert)
-   → hybrid index (BM25 + pgvector) + Neo4j graph loader (4 node types only:
-     Company, Person, Filing, RiskFactor)
+openFDA API ─┐                                   ┌─ documents/document_sections (Postgres)
+             ├─ source adapter (fetch+normalize) ┤    source_type discriminator, meta JSONB
+SEC EDGAR ───┘   retry+backoff, rate limit,      ├─ hybrid index: doc_chunks
+                 OCR fallback (SEC), schema-     │    (tsvector+GIN ∥ pgvector+HNSW)
+                 drift detector per doc type     └─ Neo4j graph loader (deterministic
+                                                      lexicon/taxonomy extraction only)
 
-Query time: Planner → parallel (Retriever [hybrid search+rerank] + Graph [Cypher]) →
-  Synthesis → Guardrail (citation-coverage check, refuse/revise if unsupported)
+Graph schema (5 node types, 2 domains):
+  (Company)-[:FILED]->(Filing)-[:DISCUSSES]->(RiskFactor)
+  (Drug)-[:TREATS]->(Condition)   (Drug)-[:INTERACTS_WITH]-(Drug)   edges carry source ids
+
+Query time: Planner → parallel (Retriever [hybrid+RRF] + Graph [parameterized Cypher]) →
+  Synthesis (every sentence cites [Cn]) → Guardrail (deterministic coverage check,
+  one revision loop, refuse over shipping unverified)
 ```
-
-Full diagrams and the SQL/Cypher schema are in the dossier — don't redesign from scratch, extend
-what's there or explicitly note in PROGRESS.md why a decision changed.
 
 ## Non-negotiables (from the portfolio strategy this project is part of)
 
-- **Build every layer yourself**, including the boring parts (migrations, retry logic, auth). No
-  copied boilerplate you can't explain line-by-line.
-- **The knowledge graph stays scoped to 4 node types.** It's justified by one specific multi-hop
-  query ("which companies share 2+ board members and both mention supply-chain risk in the same
-  fiscal year"). Don't let it sprawl — a bigger graph without a bigger justification is a resume
-  liability, not an asset.
-- **Citation-forced generation is the core guarantee.** Every synthesized answer must trace to a
-  real chunk or graph fact; the guardrail agent checks this programmatically, separate from the
-  agent that wrote the answer.
-- **Docker/CI/eval-harness are not stretch goals.** They're graded as required baseline — see the
-  dossier's "non-negotiables" panel in the Recommendation section.
-- **Metrics before resume bullets.** Every "X%" placeholder in the dossier's resume-bullet section
-  gets replaced with a number measured from this repo's own eval run — never estimated.
+- **Build every layer yourself**, including the boring parts (migrations, retry logic, auth).
+  No copied boilerplate you can't explain line-by-line.
+- **The knowledge graph stays tiny and query-justified.** Budget: ≤3 node types per domain,
+  each domain earning its place with one multi-hop query text-RAG structurally can't answer.
+  Currently 5 types total; the drug arm's justifying query — "which drugs treating condition X
+  have a labeled interaction with drug Y?" — runs live. A bigger graph without a bigger
+  justification is a resume liability, not an asset.
+- **Citation-forced generation is the core guarantee.** Every synthesized answer must trace to
+  a real chunk or graph fact; the guardrail agent checks this programmatically, separate from
+  the agent that wrote the answer. Graph extraction is deterministic (lexicon/taxonomy match,
+  no LLM) for the same reason: the reliable arm must stay reliable.
+- **Docker/CI/eval-harness are not stretch goals.** They're graded as required baseline.
+- **Metrics before resume bullets.** Every "X%" on the resume comes from this repo's own eval
+  run — never estimated. Current (20-case live run, 2026-07-10): refusal_correctness 0.95,
+  citation_validity 1.00, keyword_coverage 0.88.
 
 ## Datastore & model decisions (locked in 2026-07-09)
 
-- **Relational + vector store:** PostgreSQL + `pgvector` — one datastore, not a separate vector DB.
-  Locally: Homebrew Postgres 17, `ledgerlens` role/database, `pgvector` 0.8.4 extension enabled.
-- **Graph store:** Neo4j (M4, not installed yet).
-- **Embedding model:** OpenAI `text-embedding-3-small` (1536 dims — matches `doc_chunks.embedding
-  VECTOR(1536)` already in the migration; don't change one without the other).
-- **Chat/completion model:** OpenAI, cost-tiered — cheaper model (e.g. `gpt-4o-mini`) for simple
-  agent steps, stronger model (e.g. `gpt-4o`) reserved for synthesis/guardrail reasoning. Requires
-  `OPENAI_API_KEY` in `.env` once M3/M5 need it — not needed for M1 ingestion.
+- **Relational + vector store:** PostgreSQL + `pgvector` — one datastore, not a separate
+  vector DB. Locally: Homebrew Postgres 17, `ledgerlens` role/database (name kept through the
+  rename — it's an implementation detail), `pgvector` 0.8.4.
+- **Graph store:** Neo4j (Homebrew).
+- **Embedding model:** OpenAI `text-embedding-3-small` (1536 dims — matches
+  `doc_chunks.embedding VECTOR(1536)`; don't change one without the other).
+- **Chat/completion model:** OpenAI, cost-tiered (CHEAP_MODEL for planner, SYNTHESIS_MODEL
+  for synthesis) — see `.env.example`.
+- **openFDA:** keyless works (40 req/min ceiling, we throttle to 30); `OPENFDA_API_KEY`
+  raises the ceiling. A no-match search returns 404-NOT_FOUND = "no such drug", not an error.
 
 ## Conventions
 
 - Python, FastAPI (async), SQLAlchemy + Alembic migrations, Celery + Redis for ingestion workers.
 - Structured logging (structlog), OpenTelemetry tracing with `trace_id` propagated end-to-end.
 - Tests live next to what they test; eval cases live in `evals/golden_qa.jsonl`.
+- pip on this machine must use `--index-url https://pypi.org/simple` (global CodeArtifact
+  config with expired token — left untouched deliberately).
 
 ## Update this file / PROGRESS.md at the end of every session
 
-A future session (different day, different machine, different Claude interface) should be able to
-read `PROGRESS.md` + `git log` and continue with zero re-explanation. If a design decision diverges
-from the dossier, record *why* here or in a commit message — don't just silently drift from the plan.
+A future session (different day, different machine, different Claude interface) should be able
+to read `PROGRESS.md` + `git log` and continue with zero re-explanation. If a design decision
+diverges from the dossier, record *why* here or in a commit message — don't just silently
+drift from the plan.

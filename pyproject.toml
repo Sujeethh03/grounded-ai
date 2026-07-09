@@ -1,7 +1,7 @@
 [project]
-name = "ledger-lens"
-version = "0.1.0"
-description = "Multi-source financial-document intelligence pipeline with citation-grounded RAG and a scoped knowledge graph."
+name = "grounded-ai"
+version = "0.2.0"
+description = "GroundedAI: a verifiable agentic retrieval platform — citation-grounded RAG over FDA drug labels and SEC filings with a scoped knowledge graph."
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",

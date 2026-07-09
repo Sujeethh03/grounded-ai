@@ -13,7 +13,7 @@ load_dotenv()
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
-app = Celery("ledger_lens", broker=REDIS_URL, backend=REDIS_URL, include=["ingestion.tasks"])
+app = Celery("grounded_ai", broker=REDIS_URL, backend=REDIS_URL, include=["ingestion.tasks"])
 
 app.conf.update(
     task_acks_late=True,  # a worker crash mid-task requeues it instead of losing it
