@@ -1,16 +1,33 @@
 # Progress
 
-## Status: GroundedAI pivot COMPLETE — two live domains, graph multi-hop proven, 20-case eval run
+## Status: DEPLOYED — live cloud URL, eval at 1.00/1.00/0.94, q3 root-caused and fixed
+
+**Live URL: https://api-production-efa5.up.railway.app** (Railway, deployed 2026-07-10).
+All five DEMO.md arc steps verified against it: cited drug answer, graph multi-hop
+("Aspirin and Ibuprofen [C1]"), refusal (acetaminophen → INSUFFICIENT_EVIDENCE), SEC
+answer, async ingestion. See DEMO.md Path B for layout + the Neo4j-volume caveat.
 
 **What GroundedAI is now:** a verifiable agentic retrieval platform with two document sources —
 FDA drug labels (headline) and SEC filings (kept as proof of source-agnosticism). Renamed from
 "Ledger Lens" on 2026-07-10; see CLAUDE.md's history note for the recorded rationale.
 
-**Eval numbers (2026-07-10, 20 cases: 10 SEC + 10 drug, gpt-4o-mini + text-embedding-3-small):**
-- **refusal_correctness 0.95** (19/20 — only miss is the long-known q3 SEC legal-proceedings
-  over-refusal), **citation_validity 1.00**, **keyword_coverage 0.88**.
-- All 10 drug cases passed, including both graph-routed cases and all 3 refusal-expected ones.
+**Eval numbers (2026-07-10 evening, 20 cases, two consecutive runs identical):**
+- **refusal_correctness 1.00, citation_validity 1.00, keyword_coverage 0.94.**
+- The jump from 0.95/1.00/0.88: q3's "over-refusal" was root-caused to a **guardrail false
+  positive** — the sentence splitter broke at "U.S. District Court" (period+space+capital),
+  creating an uncited fragment from a fully-cited sentence. Fixed with a negative lookbehind
+  for single-capital abbreviations + regression tests. A synthesis-prompt rule ("each sentence
+  must carry its own [Cn], even mid-paragraph") killed the other flaky failure mode.
 - These numbers fill the resume bullet placeholders. Re-run with `python -m evals.run_eval`.
+
+**Retrieval experiment, measured and reverted (2026-07-10):** the recorded candidate fix for
+the lexical arm's 0-hits-on-full-questions (OR-ed keyword fallback, then a rarity-filtered
+variant) was implemented and **made retrieval worse**: ts_rank has no IDF, so common-word
+matches flooded the lexical list and RRF's both-arms boost displaced the dense arm's correct
+top-5 (eval q13 lisinopril-indications went from 4/5 correct chunks to 0/5, three consecutive
+eval failures). Reverted; the decision + measurement live in a NOTE in
+`retrieval/hybrid_search.py`. Full-question queries stay dense-carried by design. This is a
+good interview story: the eval harness caught a plausible "improvement" being a regression.
 
 **Corpus (local DB):** 12 SEC filings (Apple, JPMorgan, Tesla) → 156 chunks; 17 drug labels
 (warfarin, aspirin, ibuprofen, lisinopril, metformin, atorvastatin, omeprazole, fluoxetine,
@@ -65,31 +82,40 @@ max, 47 TREATS, 22 INTERACTS_WITH.
 
 ## NOT done yet (be honest about these)
 
-1. **Deployment**: no live URL yet (Railway — see DEMO.md Path B). Railway CLI installed
-   2026-07-10; blocked on `railway login` (interactive). Note: this machine has NO local
-   container runtime (no Docker/colima) — Railway builds the Dockerfiles in the cloud, so
-   the cloud build doubles as the post-pivot image verification.
+1. **Neo4j cloud volume**: the free-tier 500MB volume couldn't hold Neo4j 5's default
+   2×256MB tx-log preallocation ("No space left on device" crashloop). Preallocation is now
+   disabled via service env vars (`NEO4J_db_tx__log_preallocate=false`, rotation 16MiB,
+   retention "1 files"), but the broken volume sits in Railway's 48h pending-deletion state,
+   so Neo4j currently runs **volume-less** (graph is ephemeral; rebuild =
+   `ssh railway-api 'python -m scripts.load_graph'`, ~5s). **After ~2026-07-12**: attach a
+   fresh volume (`railway volume --service <neo4j-id> add --mount-path /data`), redeploy,
+   re-run load_graph.
 2. **Cross-encoder reranking**: baseline numbers exist; needs torch/sentence-transformers.
 3. **RAGAS faithfulness** on top of the deterministic harness.
 4. **Semantic support-checking in guardrail**: coverage-only today; "does the cited chunk
    actually support the sentence" needs a second LLM pass — next hardening step.
-5. **Retrieval quality items**: q3 SEC over-refusal; lexical arm returns 0 hits on
-   full-question queries (websearch_to_tsquery ANDs all terms) — dense arm carries those;
-   candidate fix: keyword-extract before tsquery.
+5. **Lexical arm returns 0 hits on full-question queries** — retained as a *known,
+   deliberate* limitation after the keyword-fallback experiment measurably hurt top-5
+   (see status section above). Dense arm carries full questions; revisit only alongside
+   reranking.
 6. **WebSocket streaming + Next.js citation-viewer UI**: dossier frontend scope, not started.
 7. **Condition taxonomy is 11 topics** — fine for 9 drugs; revisit if the corpus grows.
 8. **Old commits carry a wrong author email** (`satya@…MacBook-Pro.local`) — they won't count
    toward Sujeeth's GitHub profile. Fixing needs a history rewrite + force push (Sujeeth's
    call). Identity is corrected globally as of 2026-07-10; new commits are fine.
+9. **Cloud corpus is bigger than local** (38 docs / 758 chunks vs 29 / 581): cloud drug
+   ingestion used default limit=3 per drug → 26 labels vs 17 local. Harmless (same drugs,
+   more label versions), but numbers differ between environments.
 
 ## Next session should
 
-1. Deploy to Railway (login done via `railway login`, then services: pgvector Postgres,
-   Redis, Neo4j, api, worker) — DEMO.md Path B depends on it.
-2. Investigate q3 over-refusal + lexical-arm keyword extraction (cheap, improves the
-   headline eval numbers).
-3. **Sujeeth must read the whole codebase and be quizzed on it** — the repo is further ahead
-   of his ability to defend it than ever after the pivot. Priority reading order in DEMO.md.
+1. If past 2026-07-12: re-attach the Neo4j volume (see item 1 above).
+2. **Sujeeth must read the whole codebase and be quizzed on it** — the repo is further ahead
+   of his ability to defend it than ever after the pivot + deploy. Priority reading order in
+   DEMO.md. The q3 guardrail-splitter story and the reverted retrieval experiment are
+   prime interview material — read both diffs.
+3. Optional hardening: semantic support-check in the guardrail (item 4) is the next
+   architecture-level step.
 
 ## Log
 
@@ -104,6 +130,16 @@ max, 47 TREATS, 22 INTERACTS_WITH.
   venv rebuilt (old one had absolute shebangs), 64 tests green after the move. Git identity
   set to Sujeeth's real email for future commits (older commits still carry the .local email).
   Railway CLI installed; deploy blocked only on interactive `railway login`.
+- **2026-07-10 (evening)** — **DEPLOYED to Railway**: pgvector Postgres + Redis + Neo4j +
+  one combined api/worker service (free-tier 5-service cap → uvicorn + Celery in one
+  container, `infra/railway.Dockerfile`; start script creates the pgvector extension and
+  runs Alembic idempotently). Volumes attached to Postgres/Redis; Neo4j volume saga in
+  "NOT done". Corpus ingested **through the deployed API itself** (9 drugs + 3 CIKs → 38
+  docs, 758 chunks), graph loaded via `railway ssh`. All five demo-arc steps verified live.
+  **q3 root-caused**: guardrail sentence-splitter false positive on "U.S." → fixed +
+  regression tests; synthesis prompt hardened; **eval now 1.00/1.00/0.94** (two identical
+  consecutive runs). Lexical keyword-fallback experiment measured, found harmful (q13),
+  reverted with the reasoning recorded in `retrieval/hybrid_search.py`. 66 tests green.
 
 ## Open decisions / deviations from the dossier
 

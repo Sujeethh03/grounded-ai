@@ -69,11 +69,24 @@ curl -s localhost:8000/readyz                      # {"status":"ready",...}
    (label revisions replace, not duplicate), openFDA rate-limited with backoff; Prometheus
    counters, structured JSON logs, /readyz does real dependency checks.
 
-## Path B — cloud URL (Railway; NOT DEPLOYED YET)
+## Path B — cloud URL (Railway; LIVE as of 2026-07-10)
 
-Same arc, swap `localhost:8000` for the Railway URL. **Warm it up 10 minutes before the
-interview** (hit /readyz and one /query). If the cloud misbehaves mid-demo: "let me show you
-on the local stack — same containers" → Path A.
+**Base URL: https://api-production-efa5.up.railway.app** — same arc, swap `localhost:8000`
+for that URL (the `python -m scripts.ask` steps become `curl -X POST $URL/api/v1/query
+-H 'content-type: application/json' -d '{"question":"..."}'`). All five arc steps were
+verified live on deploy day, including the graph multi-hop and the refusal.
+
+**Warm it up 10 minutes before the interview** (hit /readyz and one /query). If the cloud
+misbehaves mid-demo: "let me show you on the local stack — same containers" → Path A.
+
+Cloud layout (Railway free tier, project `grounded-ai`): pgvector Postgres, Redis, Neo4j,
+and one `api` service that runs uvicorn + the Celery worker in a single container
+(`infra/railway.Dockerfile` + `infra/railway_start.sh`) because the free plan caps
+provisioned services at 5 — say this out loud if asked, it's a deliberate recorded tradeoff.
+Known caveat: the Neo4j service currently has **no volume** (free-tier volume was too small
+for Neo4j's default 256MB-per-db tx-log preallocation; fixed via env vars, but the old volume
+is in a 48h pending-deletion state until ~2026-07-12). If Neo4j restarts, rebuild the graph
+with: `ssh railway-api 'python -m scripts.load_graph'` (~5 seconds).
 
 ## Questions to expect (short answers you must own)
 
