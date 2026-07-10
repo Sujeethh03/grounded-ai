@@ -65,24 +65,27 @@ max, 47 TREATS, 22 INTERACTS_WITH.
 
 ## NOT done yet (be honest about these)
 
-1. **GitHub repo still named ledger-lens** — rename to grounded-ai pending (gh repo rename;
-   redirects preserve old links). Local folder name likewise.
+1. **Deployment**: no live URL yet (Railway — see DEMO.md Path B). Railway CLI installed
+   2026-07-10; blocked on `railway login` (interactive). Note: this machine has NO local
+   container runtime (no Docker/colima) — Railway builds the Dockerfiles in the cloud, so
+   the cloud build doubles as the post-pivot image verification.
 2. **Cross-encoder reranking**: baseline numbers exist; needs torch/sentence-transformers.
 3. **RAGAS faithfulness** on top of the deterministic harness.
 4. **Semantic support-checking in guardrail**: coverage-only today; "does the cited chunk
    actually support the sentence" needs a second LLM pass — next hardening step.
-5. **Docker images not rebuilt/tested since the pivot** (they were verified pre-pivot).
-6. **Deployment**: no live URL yet (Railway planned — see DEMO.md Path B).
-7. **Retrieval quality items**: q3 SEC over-refusal; lexical arm returns 0 hits on
+5. **Retrieval quality items**: q3 SEC over-refusal; lexical arm returns 0 hits on
    full-question queries (websearch_to_tsquery ANDs all terms) — dense arm carries those;
    candidate fix: keyword-extract before tsquery.
-8. **WebSocket streaming + Next.js citation-viewer UI**: dossier frontend scope, not started.
-9. **Condition taxonomy is 11 topics** — fine for 9 drugs; revisit if the corpus grows.
+6. **WebSocket streaming + Next.js citation-viewer UI**: dossier frontend scope, not started.
+7. **Condition taxonomy is 11 topics** — fine for 9 drugs; revisit if the corpus grows.
+8. **Old commits carry a wrong author email** (`satya@…MacBook-Pro.local`) — they won't count
+   toward Sujeeth's GitHub profile. Fixing needs a history rewrite + force push (Sujeeth's
+   call). Identity is corrected globally as of 2026-07-10; new commits are fine.
 
 ## Next session should
 
-1. Rename the GitHub repo + local folder (5 min), rebuild Docker images against the new
-   code, then deploy (Railway) — DEMO.md Path B depends on it.
+1. Deploy to Railway (login done via `railway login`, then services: pgvector Postgres,
+   Redis, Neo4j, api, worker) — DEMO.md Path B depends on it.
 2. Investigate q3 over-refusal + lexical-arm keyword extraction (cheap, improves the
    headline eval numbers).
 3. **Sujeeth must read the whole codebase and be quizzed on it** — the repo is further ahead
@@ -96,6 +99,11 @@ max, 47 TREATS, 22 INTERACTS_WITH.
 - **2026-07-10** — **GroundedAI pivot**: schema generalized to multi-source documents; openFDA
   drug-label adapter built + live-proven; drug graph arm (Drug/Condition, TREATS/INTERACTS_WITH)
   with live multi-hop; eval set doubled to 20 (0.95/1.00/0.88); renamed from Ledger Lens.
+- **2026-07-10 (later)** — rename finished everywhere: GitHub repo is
+  github.com/Sujeethh03/grounded-ai (redirects preserved), local folder → ~/grounded-ai,
+  venv rebuilt (old one had absolute shebangs), 64 tests green after the move. Git identity
+  set to Sujeeth's real email for future commits (older commits still carry the .local email).
+  Railway CLI installed; deploy blocked only on interactive `railway login`.
 
 ## Open decisions / deviations from the dossier
 

@@ -9,7 +9,7 @@ Two demo paths. Practice Path A once; keep Path B warm as the fallback once depl
 
 ```bash
 brew services start postgresql@17 redis neo4j     # all three must be running
-cd ~/ledger-lens && source .venv/bin/activate     # (folder rename pending)
+cd ~/grounded-ai && source .venv/bin/activate
 pytest -q                                          # 64 passed = green light
 celery -A ingestion.celery_app worker --loglevel=warning &   # terminal 1
 uvicorn api.main:app --port 8000 &                            # terminal 2
